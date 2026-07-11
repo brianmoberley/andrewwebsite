@@ -1,0 +1,33 @@
+{
+  "name": "@construction/db",
+  "version": "0.1.0",
+  "private": true,
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "require": "./dist/index.js"
+    },
+    "./client": {
+      "import": "./src/client.ts",
+      "require": "./dist/client.js"
+    }
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "prisma"],
+  "scripts": {
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
+    "seed": "node --loader ts-node/esm ./scripts/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.7.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.7.0",
+    "ts-node": "^10.9.1",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}

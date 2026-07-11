@@ -1,0 +1,678 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===== AUTHENTICATION & USERS =====
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  firstName String
+  lastName  String
+  password  String   // hashed
+  phone     String?
+
+  role      Role     @relation(fields: [roleId], references: [id])
+  roleId    String
+
+  status    String   @default("active") // active, inactive, archived
+
+  // Relations
+  leads     Lead[]   @relation("LeadAssignedTo")
+  customers Customer[]
+  estimatesCreated Estimate[] @relation("EstimateCreatedBy")
+  projectsManaged Project[] @relation("ProjectManager")
+  scheduleAssignments ScheduleEvent[] @relation("ScheduleAssignedTo")
+  uploadedFiles File[] @relation("UploadedBy")
+
+  // Audit
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  lastLoginAt DateTime?
+
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique // super_admin, admin, estimator, project_manager, crew_member, office_staff, customer
+  description String?
+  permissions String[] // JSON array stored as text
+
+  users       User[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("roles")
+}
+
+// ===== LEADS & CUSTOMERS =====
+
+model Lead {
+  id        String   @id @default(cuid())
+
+  firstName String
+  lastName  String
+  email     String
+  phone     String
+
+  address   Address?
+
+  projectType      String     // e.g., "Kitchen Remodel", "Roofing"
+  projectDescription String?
+  budgetRange      String?    // e.g., "5000-10000"
+  desiredTimeline  String?
+
+  leadSource       String     // web_form, phone_call, referral, etc.
+  status           String     @default("new") // new, contacted, appointment_scheduled, estimate_needed, estimate_sent, follow_up_needed, won, lost, archived
+
+  assignedTo       User?      @relation("LeadAssignedTo", fields: [assignedToId], references: [id])
+  assignedToId     String?
+
+  // Consent & Preferences
+  smsConsent       Boolean    @default(false)
+  emailConsent     Boolean    @default(true)
+  preferredContact String?    // email, phone, sms
+
+  // Relations
+  messages         Message[]
+  scheduleEvents   ScheduleEvent[]
+  uploadedFiles    File[]
+  estimates        Estimate[]
+
+  // Audit
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  lastContactedAt  DateTime?
+
+  @@index([status])
+  @@index([assignedToId])
+  @@map("leads")
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+
+  firstName String
+  lastName  String
+  email     String
+  phone     String
+
+  billingAddress   Address?
+  projectAddress   Address?
+
+  // Consent & Preferences
+  smsConsent       Boolean    @default(false)
+  emailConsent     Boolean    @default(true)
+
+  // Relations
+  user             User?      @relation(fields: [userId], references: [id])
+  userId           String?    @unique
+
+  projects         Project[]
+  estimates        Estimate[]
+  invoices         Invoice[]
+  payments         Payment[]
+  messages         Message[]
+  uploadedFiles    File[]
+
+  notes            String?
+
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@index([email])
+  @@map("customers")
+}
+
+model Address {
+  id        String   @id @default(cuid())
+
+  line1     String
+  line2     String?
+  city      String
+  state     String
+  zipCode   String
+  country   String   @default("US")
+
+  // Polymorphic relation
+  leadId    String?  @unique
+  lead      Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  customerId String?  @unique
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  projectId  String?  @unique
+  project    Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("addresses")
+}
+
+// ===== PROJECTS =====
+
+model Project {
+  id        String   @id @default(cuid())
+
+  customer  Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customerId String
+
+  title     String
+  description String?
+  address   Address?
+
+  status    String   @default("not_started") // not_started, scheduled, in_progress, waiting_on_customer, waiting_on_materials, waiting_on_permit, delayed, completed, closed, canceled
+
+  manager   User     @relation("ProjectManager", fields: [managerId], references: [id])
+  managerId String
+
+  // Scheduling
+  startDate DateTime?
+  targetCompletionDate DateTime?
+  actualCompletionDate DateTime?
+
+  // Relations
+  estimate  Estimate?
+  invoices  Invoice[]
+  tasks     ProjectTask[]
+  scheduleEvents ScheduleEvent[]
+  messages  Message[]
+  uploadedFiles File[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([managerId])
+  @@index([status])
+  @@map("projects")
+}
+
+model ProjectTask {
+  id        String   @id @default(cuid())
+
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String
+
+  title     String
+  description String?
+
+  status    String   @default("not_started") // not_started, in_progress, blocked, complete, canceled
+  priority  String   @default("medium") // low, medium, high
+  dueDate   DateTime?
+
+  phase     String?  // demolition, framing, electrical, etc.
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@map("project_tasks")
+}
+
+// ===== ESTIMATES =====
+
+model Estimate {
+  id        String   @id @default(cuid())
+
+  estimateNumber String @unique
+  status    String   @default("draft") // draft, sent, viewed, approved, rejected, expired, revised, converted_to_project
+
+  lead      Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  leadId    String?
+
+  customer  Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerId String?
+
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  projectId String?   @unique
+
+  estimateDate DateTime @default(now())
+  expirationDate DateTime?
+
+  // Pricing
+  subtotal  Decimal  @default(0) @db.Decimal(12, 2)
+  tax       Decimal  @default(0) @db.Decimal(12, 2)
+  discount  Decimal  @default(0) @db.Decimal(12, 2)
+  total     Decimal  @default(0) @db.Decimal(12, 2)
+
+  lineItems EstimateLineItem[]
+
+  // Terms
+  terms     String?
+  notes     String?
+
+  // Approval
+  approvedAt DateTime?
+  rejectedAt DateTime?
+  approvedBy String?
+
+  // Meta
+  createdBy User    @relation("EstimateCreatedBy", fields: [createdById], references: [id])
+  createdById String
+
+  messages  Message[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([leadId])
+  @@index([customerId])
+  @@map("estimates")
+}
+
+model EstimateLineItem {
+  id        String   @id @default(cuid())
+
+  estimate  Estimate @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+  estimateId String
+
+  description String
+  quantity  Decimal  @db.Decimal(10, 2)
+  unit      String   // each, sqft, linear ft, hour, etc.
+  unitCost  Decimal  @db.Decimal(12, 2)
+  markupPercent Decimal @default(0) @db.Decimal(5, 2)
+  taxable   Boolean  @default(true)
+
+  lineTotal Decimal  @db.Decimal(12, 2)
+  sortOrder Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([estimateId])
+  @@map("estimate_line_items")
+}
+
+// ===== INVOICES =====
+
+model Invoice {
+  id        String   @id @default(cuid())
+
+  invoiceNumber String @unique
+  status    String   @default("draft") // draft, sent, viewed, partially_paid, paid, overdue, canceled, refunded, written_off
+
+  customer  Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customerId String
+
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String
+
+  invoiceDate DateTime @default(now())
+  dueDate    DateTime
+
+  // Pricing
+  subtotal  Decimal  @default(0) @db.Decimal(12, 2)
+  tax       Decimal  @default(0) @db.Decimal(12, 2)
+  discount  Decimal  @default(0) @db.Decimal(12, 2)
+  total     Decimal  @default(0) @db.Decimal(12, 2)
+
+  amountPaid Decimal @default(0) @db.Decimal(12, 2)
+  balanceDue Decimal @db.Decimal(12, 2)
+
+  lineItems InvoiceLineItem[]
+
+  // Terms
+  terms     String?
+  notes     String?
+
+  // Payment
+  paymentLink String?
+
+  messages  Message[]
+  payments  Payment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([customerId])
+  @@index([projectId])
+  @@map("invoices")
+}
+
+model InvoiceLineItem {
+  id        String   @id @default(cuid())
+
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId String
+
+  description String
+  quantity  Decimal  @db.Decimal(10, 2)
+  unit      String
+  unitPrice Decimal  @db.Decimal(12, 2)
+  taxable   Boolean  @default(true)
+
+  lineTotal Decimal  @db.Decimal(12, 2)
+  sortOrder Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([invoiceId])
+  @@map("invoice_line_items")
+}
+
+model Payment {
+  id        String   @id @default(cuid())
+
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId String
+
+  customer  Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customerId String
+
+  amount    Decimal  @db.Decimal(12, 2)
+
+  paymentMethod String // credit_card, ach, check, cash
+  paymentProvider String? // stripe, square, paypal
+  providerTransactionId String?
+
+  status    String   @default("pending") // pending, completed, failed, refunded
+
+  paidAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([invoiceId])
+  @@index([customerId])
+  @@map("payments")
+}
+
+// ===== SCHEDULING =====
+
+model ScheduleEvent {
+  id        String   @id @default(cuid())
+
+  eventType String   // estimate_appointment, project_start, inspection, final_walkthrough, etc.
+  title     String
+  description String?
+
+  lead      Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  leadId    String?
+
+  customer  Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customerId String?
+
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String?
+
+  assignedTo User?   @relation("ScheduleAssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
+  assignedToId String?
+
+  startTime DateTime
+  endTime   DateTime
+
+  location  String?
+  status    String   @default("scheduled") // scheduled, confirmed, completed, canceled, rescheduled
+
+  // Calendar Integration
+  externalCalendarEventId String?
+  calendarProvider String? // google, microsoft, internal
+
+  messages  Message[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([leadId])
+  @@index([customerId])
+  @@index([projectId])
+  @@index([startTime])
+  @@map("schedule_events")
+}
+
+// ===== COMMUNICATIONS =====
+
+model Message {
+  id        String   @id @default(cuid())
+
+  // Polymorphic relation
+  lead      Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  leadId    String?
+
+  customer  Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customerId String?
+
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String?
+
+  estimate  Estimate? @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+  estimateId String?
+
+  invoice   Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId String?
+
+  scheduleEvent ScheduleEvent? @relation(fields: [scheduleEventId], references: [id], onDelete: Cascade)
+  scheduleEventId String?
+
+  channel   String   // email, sms, internal_note, customer_message
+  direction String   // inbound, outbound
+
+  recipient String   // email or phone number
+  sender    String?  // email or phone number or user id
+
+  subject   String?
+  body      String
+
+  // Provider Info
+  provider  String?  // sendgrid, twilio, stripe
+  providerMessageId String?
+
+  status    String   @default("sent") // sent, delivered, failed, bounced, opened, clicked
+
+  sentAt    DateTime @default(now())
+  deliveredAt DateTime?
+  failedAt  DateTime?
+  failureReason String?
+
+  createdAt DateTime @default(now())
+
+  @@index([leadId])
+  @@index([customerId])
+  @@index([channel])
+  @@map("messages")
+}
+
+// ===== FILES & MEDIA =====
+
+model File {
+  id        String   @id @default(cuid())
+
+  fileName  String
+  fileType  String   // image/jpeg, application/pdf, etc.
+  fileSize  Int      // bytes
+  fileUrl   String
+
+  storageProvider String // s3, supabase, etc.
+  storagePath String?
+
+  category  String?  // before, after, estimate, invoice, permit, inspection
+  visibility String @default("private") // private, public
+
+  // Polymorphic relation
+  lead      Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  leadId    String?
+
+  customer  Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customerId String?
+
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String?
+
+  portfolioProject PortfolioProject? @relation(fields: [portfolioProjectId], references: [id], onDelete: Cascade)
+  portfolioProjectId String?
+
+  uploadedBy User    @relation("UploadedBy", fields: [uploadedById], references: [id])
+  uploadedById String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([leadId])
+  @@index([customerId])
+  @@index([projectId])
+  @@map("files")
+}
+
+// ===== PORTFOLIO & TESTIMONIALS =====
+
+model PortfolioProject {
+  id        String   @id @default(cuid())
+
+  title     String
+  slug      String   @unique
+  description String?
+
+  category  String   // residential, commercial, remodel, kitchen, bathroom, etc.
+  location  String?
+
+  completionDate DateTime?
+
+  featuredImage File?
+  images    File[]
+
+  published Boolean  @default(false)
+
+  testimonial Testimonial?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([published])
+  @@map("portfolio_projects")
+}
+
+model Testimonial {
+  id        String   @id @default(cuid())
+
+  customerName String
+  displayName String? // if different from customerName
+
+  projectType String?
+  rating    Int      @default(5) // 1-5
+  reviewText String
+
+  published Boolean  @default(false)
+
+  portfolioProject PortfolioProject? @relation(fields: [portfolioProjectId], references: [id], onDelete: SetNull)
+  portfolioProjectId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([published])
+  @@map("testimonials")
+}
+
+// ===== WEBSITE CONTENT =====
+
+model WebsitePage {
+  id        String   @id @default(cuid())
+
+  title     String
+  slug      String   @unique
+
+  content   String   // Rich text / JSON
+
+  seoTitle  String?
+  seoDescription String?
+  ogImage   String?
+
+  published Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("website_pages")
+}
+
+// ===== INTEGRATIONS & CONFIG =====
+
+model CalendarIntegration {
+  id        String   @id @default(cuid())
+
+  provider  String   // google, microsoft, internal
+  email     String?
+
+  accessToken String
+  refreshToken String?
+  tokenExpiresAt DateTime?
+
+  userId    String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("calendar_integrations")
+}
+
+model EmailTemplate {
+  id        String   @id @default(cuid())
+
+  name      String   @unique
+  subject   String
+  body      String   // HTML content
+
+  templateType String // confirmation, reminder, estimate_sent, invoice_sent, etc.
+
+  enabled   Boolean  @default(true)
+
+  variables String[] // JSON array of variable names
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("email_templates")
+}
+
+model SmsTemplate {
+  id        String   @id @default(cuid())
+
+  name      String   @unique
+  body      String   // 160 chars per message
+
+  templateType String // confirmation, reminder, payment_reminder, etc.
+
+  enabled   Boolean  @default(true)
+
+  variables String[] // JSON array of variable names
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("sms_templates")
+}
+
+// ===== AUDIT LOG =====
+
+model AuditLog {
+  id        String   @id @default(cuid())
+
+  userId    String?
+
+  action    String   // login, create_lead, send_estimate, approve_estimate, etc.
+
+  entityType String? // lead, customer, estimate, invoice, etc.
+  entityId  String?
+
+  changes   String?  // JSON diff
+
+  ipAddress String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([entityType])
+  @@map("audit_logs")
+}
