@@ -94,7 +94,7 @@ export default function EstimateForm() {
           <div>
             <h3 className="font-bold text-green-900">Success!</h3>
             <p className="text-green-700">
-              We've received your request. Check your email for confirmation.
+              We&apos;ve received your request. Check your email for confirmation.
             </p>
           </div>
         </div>

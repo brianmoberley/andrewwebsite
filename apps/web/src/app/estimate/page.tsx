@@ -15,7 +15,7 @@ export default function EstimatePage() {
             Free Estimate Request
           </h1>
           <p className="text-xl text-gray-600">
-            Tell us about your project and we'll provide a detailed estimate
+            Tell us about your project and we&apos;ll provide a detailed estimate
           </p>
         </div>
 
