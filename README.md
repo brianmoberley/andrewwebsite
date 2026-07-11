@@ -42,6 +42,14 @@ Services will run on:
 - **Admin Dashboard**: http://localhost:3002
 - **API Server**: http://localhost:3001
 
+### View on GitHub Pages
+
+The frontend website is automatically deployed to GitHub Pages on every push:
+
+**Live Site**: https://brianmoberley.github.io/andrewwebsite/
+
+See [GitHub Pages Setup Guide](./docs/GITHUB_PAGES_SETUP.md) for configuration details.
+
 ### Individual Services
 
 ```bash
